@@ -172,7 +172,7 @@ tpick — terminal theme picker
 
 USAGE
   tpick              Auto-detect terminal and open picker
-  tpick fetch        Download 174 themes from alacritty/alacritty-theme
+  tpick fetch        Download themes from alacritty/alacritty-theme
   tpick --alacritty  Force Alacritty mode
 
 CONTROLS

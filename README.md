@@ -2,12 +2,12 @@
 
 > Pick your terminal theme without leaving the terminal.
 
-You know the drill: you want a new theme for your terminal, spend 30 minutes googling, find a repo with 174 themes, manually edit your config, restart the terminal, hate the color, repeat. **tpick fixes that.**
+You know the drill: you want a new theme for your terminal, spend 30 minutes googling, find a repo with hundreds of themes, manually edit your config, restart the terminal, hate the color, repeat. **tpick fixes that.**
 
 Navigate themes with arrow keys and the terminal updates *live* as you move — no config editing, no restarts. Press Esc if you don't like anything and your original theme comes right back.
 
 ```
-tpick fetch   # grab 174 themes from the official alacritty-theme repo
+tpick fetch   # grab themes from the official alacritty-theme repo
 tpick         # open the picker, arrow keys, done
 ```
 
@@ -33,7 +33,7 @@ The installer will:
 - Detect your terminal config automatically
 - Enable `live_config_reload` in Alacritty if needed
 - Add one line to your `.zshrc` / `.bashrc`
-- Optionally download all 174 themes right away
+- Optionally download all themes right away
 
 **Already have dotfiles? Just add one line:**
 ```bash
@@ -48,7 +48,7 @@ source ~/.zshrc
 
 ```bash
 tpick              # auto-detect terminal and open picker
-tpick fetch        # download 174 themes from alacritty/alacritty-theme
+tpick fetch        # download themes from alacritty/alacritty-theme
 tpick --alacritty  # force Alacritty mode
 tpick --claude     # Claude Code theme picker
 tpick --help       # show all options
@@ -59,7 +59,7 @@ tpick --help       # show all options
 | Key | Action |
 |---|---|
 | `↑` / `↓` or `Tab` / `Shift-Tab` | Navigate — theme applies live |
-| `Ctrl-D` / `Ctrl-U` | Scroll half-page down/up (fast when you have 174 themes) |
+| `Ctrl-D` / `Ctrl-U` | Scroll half-page down/up (fast browsing) |
 | `Enter` | Confirm and keep the theme |
 | `Esc` | Cancel and restore your original theme |
 | `/` + type | Search by name |

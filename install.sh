@@ -111,7 +111,7 @@ echo ""
 
 # ── Offer to download themes ──────────────────────────────────────────────────
 
-read -rp "  Download 174 themes now? [Y/n] " yn
+read -rp "  Download themes from alacritty/alacritty-theme now? [Y/n] " yn
 if [[ "${yn:-Y}" =~ ^[Yy]$ ]]; then
   echo ""
   python3 "$INSTALL_DIR/fetch_themes.py"
