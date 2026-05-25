@@ -45,6 +45,10 @@ def main():
     c = parse(path)
     bg  = c.get("colors.primary.background", "#1a1a1a")
     fg  = c.get("colors.primary.foreground", "#f0f0f0")
+    red = c.get("colors.normal.red",    "#ff5555")
+    grn = c.get("colors.normal.green",  "#55ff55")
+    yel = c.get("colors.normal.yellow", "#ffff55")
+    blu = c.get("colors.normal.blue",   "#5555ff")
     r, g, b = hex_to_rgb(bg)
     fr, fg2, fb = hex_to_rgb(fg)
 
@@ -76,37 +80,25 @@ def main():
         print()
 
     # ── Claude Code mock ──────────────────────────────────────────────────────
-    # Claude Code dark theme fixed colors — independent of terminal theme
-    CC_BG      = "#1e1e1e"
-    CC_FG      = "#d4d4d4"
-    CC_REM_BG  = "#3d1515"   # dark red   background for removed lines
-    CC_ADD_BG  = "#153d15"   # dark green background for added lines
-    CC_REM_FG  = "#f87171"   # red   text on removed lines
-    CC_ADD_FG  = "#4ade80"   # green text on added lines
-    CC_DIM     = "#6b6b6b"   # unchanged lines
-    CC_BLUE    = "#60a5fa"   # tool call dot
-    CC_YELLOW  = "#fbbf24"   # bash dot
-
+    # Claude Code uses chalk bgRed/bgGreen (ANSI indexed), so the diff bg
+    # comes directly from the terminal theme's colors.normal.red/green.
     print(f"  \033[2m{'─' * 38}\033[0m")
     print(f"  \033[2mClaude Code preview\033[0m")
     print()
 
-    # Tool call line
-    print(f"  {on_bg(CC_BG, CC_BLUE, '● ')}  {on_bg(CC_BG, CC_FG, 'Edit')}  \033[2msrc/app.ts\033[0m")
+    print(f"  {on_bg(bg, blu, '● ')}  {on_bg(bg, fg, 'Edit')}  \033[2msrc/app.ts\033[0m")
     print()
 
-    # Diff block
     W = 36
     l_rem  = f"  {'- const x = oldValue':<{W}}"
     l_unch = f"  {'  const y = value':<{W}}"
     l_add  = f"  {'+  const x = newValue':<{W}}"
-    print(f"  {on_bg(CC_REM_BG, CC_REM_FG, l_rem)}")
-    print(f"  {on_bg(CC_BG,     CC_DIM,    l_unch)}")
-    print(f"  {on_bg(CC_ADD_BG, CC_ADD_FG, l_add)}")
+    print(f"  {on_bg(red, bg, l_rem)}")   # bgRed   → terminal's normal.red as bg
+    print(f"  {on_bg(bg,  fg, l_unch)}")
+    print(f"  {on_bg(grn, bg, l_add)}")   # bgGreen → terminal's normal.green as bg
     print()
 
-    # Tool output line
-    print(f"  {on_bg(CC_BG, CC_YELLOW, '●')}  \033[2mBash\033[0m  \033[2mnpm run build\033[0m")
+    print(f"  {on_bg(bg, yel, '●')}  \033[2mBash\033[0m  \033[2mnpm run build\033[0m")
     print(f"  \033[2m  └ Build successful in 1.2s\033[0m")
     print()
 
