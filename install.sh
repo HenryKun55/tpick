@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -e
 
+# When run via "curl | bash" stdin is the pipe (the script itself), not the
+# terminal — read prompts would consume script lines instead of user input.
+# Redirect to /dev/tty so interactive prompts work correctly.
+[[ -t 0 ]] || exec < /dev/tty
+
 REPO="https://github.com/HenryKun55/tpick"
 INSTALL_DIR="${TPICK_DIR:-$HOME/.tpick}"
 
