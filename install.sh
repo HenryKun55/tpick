@@ -21,33 +21,37 @@ echo ""
 
 # ── Dependencies ──────────────────────────────────────────────────────────────
 
+_install_pkg() {
+  local pkg="$1"
+  if _have brew; then
+    read -rp "     Install $pkg with brew? [Y/n] " yn
+    [[ "${yn:-Y}" =~ ^[Yy]$ ]] && brew install "$pkg" || return 1
+  elif _have apt-get; then
+    read -rp "     Install $pkg with apt? [Y/n] " yn
+    [[ "${yn:-Y}" =~ ^[Yy]$ ]] && sudo apt-get install -y "$pkg" || return 1
+  elif _have pacman; then
+    read -rp "     Install $pkg with pacman? [Y/n] " yn
+    [[ "${yn:-Y}" =~ ^[Yy]$ ]] && sudo pacman -S --noconfirm "$pkg" || return 1
+  else
+    return 1
+  fi
+}
+
 if ! _have python3; then
-  echo "  python3 is required but not found. Please install it first."
-  exit 1
+  _warn "python3 not found (required)"
+  _install_pkg python3 || { _info "Install python3: https://python.org"; exit 1; }
 fi
 _ok "python3 found"
 
 if ! _have git; then
-  echo "  git is required but not found. Please install it first."
-  exit 1
+  _warn "git not found (required)"
+  _install_pkg git || { _info "Install git: https://git-scm.com"; exit 1; }
 fi
 _ok "git found"
 
 if ! _have fzf; then
   _warn "fzf not found (required for the picker)"
-  if _have brew; then
-    read -rp "     Install with brew now? [Y/n] " yn
-    [[ "${yn:-Y}" =~ ^[Yy]$ ]] && brew install fzf || { echo "  Install fzf: https://github.com/junegunn/fzf"; exit 1; }
-  elif _have apt-get; then
-    read -rp "     Install with apt now? [Y/n] " yn
-    [[ "${yn:-Y}" =~ ^[Yy]$ ]] && sudo apt-get install -y fzf || exit 1
-  elif _have pacman; then
-    read -rp "     Install with pacman now? [Y/n] " yn
-    [[ "${yn:-Y}" =~ ^[Yy]$ ]] && sudo pacman -S --noconfirm fzf || exit 1
-  else
-    _info "Install fzf: https://github.com/junegunn/fzf#installation"
-    exit 1
-  fi
+  _install_pkg fzf || { _info "Install fzf: https://github.com/junegunn/fzf#installation"; exit 1; }
 fi
 _ok "fzf found"
 
