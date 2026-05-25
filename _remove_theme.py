@@ -16,67 +16,90 @@ import os, sys
 args = [a for a in sys.argv[1:] if a != "--wait"]
 WAIT = "--wait" in sys.argv
 
-if not args:
-    print("  usage: _remove_theme.py <theme_path> [protected_path] [--wait]")
-    if WAIT: input("  Press Enter to continue...")
-    sys.exit(1)
 
-target = args[0]
-protected = args[1] if len(args) > 1 else ""
-favs_file = os.environ.get(
-    "TPICK_FAVORITES",
-    os.path.expanduser("~/.local/share/tpick/favorites"),
-)
+def wait_for_enter():
+    if WAIT:
+        try:
+            input("  Press Enter to continue...")
+        except (KeyboardInterrupt, EOFError):
+            pass
 
-target_name = os.path.basename(target)
 
-def fail(msg):
+def fail(msg, code=1):
     print(f"  {msg}")
-    if WAIT: input("  Press Enter to continue...")
-    sys.exit(1)
+    wait_for_enter()
+    sys.exit(code)
 
-if not os.path.isfile(target):
-    fail(f"theme not found: {target}")
 
-if target_name == "alacritty.toml":
-    fail("refusing to remove 'alacritty.toml' (the config itself)")
-
-# Protect the theme that was active when the picker opened.
-if protected:
+def safe_input(prompt):
     try:
-        same = os.path.samefile(target, os.path.expanduser(protected))
-    except (FileNotFoundError, OSError):
-        same = False
-    if same:
-        print(f"  '{target_name}' was the active theme when you opened tpick.")
-        print("  Apply a different theme first (Enter on it), then remove this one.")
-        if WAIT: input("  Press Enter to continue...")
+        return input(prompt)
+    except (KeyboardInterrupt, EOFError):
+        print()
+        fail("cancelled", code=130)
+
+
+def main():
+    if not args:
+        print("  usage: _remove_theme.py <theme_path> [protected_path] [--wait]")
+        wait_for_enter()
         sys.exit(1)
 
-try:
-    yn = input(f"  Remove {target_name}? [y/N] ").strip().lower()
-except EOFError:
-    yn = ""
+    target = args[0]
+    protected = args[1] if len(args) > 1 else ""
+    favs_file = os.environ.get(
+        "TPICK_FAVORITES",
+        os.path.expanduser("~/.local/share/tpick/favorites"),
+    )
 
-if yn not in ("y", "yes"):
-    print("  aborted")
-    if WAIT: input("  Press Enter to continue...")
-    sys.exit(1)
+    target_name = os.path.basename(target)
 
-try:
-    os.remove(target)
-    print(f"  ✓ removed {target}")
-except Exception as e:
-    fail(f"failed to remove: {e}")
+    if not os.path.isfile(target):
+        fail(f"theme not found: {target}")
 
-# Scrub from favorites file if present.
-if os.path.exists(favs_file):
+    if target_name == "alacritty.toml":
+        fail("refusing to remove 'alacritty.toml' (the config itself)")
+
+    if protected:
+        try:
+            same = os.path.samefile(target, os.path.expanduser(protected))
+        except (FileNotFoundError, OSError):
+            same = False
+        if same:
+            print(f"  '{target_name}' was the active theme when you opened tpick.")
+            print("  Apply a different theme first (Enter on it), then remove this one.")
+            wait_for_enter()
+            sys.exit(1)
+
+    yn = safe_input(f"  Remove {target_name}? [y/N] ").strip().lower()
+    if yn not in ("y", "yes"):
+        print("  aborted")
+        wait_for_enter()
+        sys.exit(1)
+
     try:
-        with open(favs_file) as f:
-            lines = [l for l in f.read().splitlines() if l.strip() and l.strip() != target_name]
-        with open(favs_file, "w") as f:
-            f.write("\n".join(lines) + ("\n" if lines else ""))
-    except Exception:
-        pass
+        os.remove(target)
+        print(f"  ✓ removed {target}")
+    except Exception as e:
+        fail(f"failed to remove: {e}")
 
-if WAIT: input("  Press Enter to continue...")
+    # Scrub from favorites file if present.
+    if os.path.exists(favs_file):
+        try:
+            with open(favs_file) as f:
+                lines = [l for l in f.read().splitlines()
+                         if l.strip() and l.strip() != target_name]
+            with open(favs_file, "w") as f:
+                f.write("\n".join(lines) + ("\n" if lines else ""))
+        except Exception:
+            pass
+
+    wait_for_enter()
+
+
+try:
+    main()
+except KeyboardInterrupt:
+    print("\n  cancelled")
+    wait_for_enter()
+    sys.exit(130)

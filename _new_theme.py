@@ -12,69 +12,98 @@ import os, re, shutil, subprocess, sys
 args = [a for a in sys.argv[1:] if a != "--wait"]
 WAIT = "--wait" in sys.argv
 
-if not args:
-    print("  usage: _new_theme.py <source_path> [--wait]")
-    if WAIT: input("  Press Enter to continue...")
-    sys.exit(1)
 
-source = args[0]
+def wait_for_enter():
+    if WAIT:
+        try:
+            input("  Press Enter to continue...")
+        except (KeyboardInterrupt, EOFError):
+            pass
 
-def fail(msg):
+
+def fail(msg, code=1):
     print(f"  {msg}")
-    if WAIT: input("  Press Enter to continue...")
-    sys.exit(1)
+    wait_for_enter()
+    sys.exit(code)
 
-if not os.path.isfile(source):
-    fail(f"source theme not found: {source}")
 
-themes_dir = os.environ.get(
-    "TPICK_THEMES_DIR",
-    os.path.expanduser("~/.local/share/tpick/themes"),
-)
-os.makedirs(themes_dir, exist_ok=True)
+def safe_input(prompt):
+    try:
+        return input(prompt)
+    except (KeyboardInterrupt, EOFError):
+        print()  # newline so the "cancelled" doesn't ride on the prompt line
+        fail("cancelled", code=130)
 
-source_name = os.path.basename(source)
-if source_name.endswith(".toml"):
-    source_name = source_name[:-5]
-print(f"  Creating a new theme based on '{source_name}'")
+
+def main():
+    if not args:
+        print("  usage: _new_theme.py <source_path> [name] [--wait]")
+        wait_for_enter()
+        sys.exit(1)
+
+    source = args[0]
+    preset_name = args[1] if len(args) > 1 else None
+
+    if not os.path.isfile(source):
+        fail(f"source theme not found: {source}")
+
+    themes_dir = os.environ.get(
+        "TPICK_THEMES_DIR",
+        os.path.expanduser("~/.local/share/tpick/themes"),
+    )
+    os.makedirs(themes_dir, exist_ok=True)
+
+    source_name = os.path.basename(source)
+    if source_name.endswith(".toml"):
+        source_name = source_name[:-5]
+    print(f"  Creating a new theme based on '{source_name}'")
+
+    if preset_name is not None:
+        name = preset_name.strip()
+    else:
+        name = safe_input("  Name for the new theme: ").strip()
+
+    if not name:
+        fail("name is required")
+
+    if name.endswith(".toml"):
+        name = name[:-5]
+
+    if not re.match(r"^[a-zA-Z0-9_-]+$", name):
+        fail("name must contain only letters, digits, _ or -")
+
+    dest = os.path.join(themes_dir, name + ".toml")
+    if os.path.exists(dest):
+        fail(f"'{name}.toml' already exists at {dest}")
+
+    try:
+        shutil.copyfile(source, dest)
+        print(f"  ✓ created {dest}")
+    except Exception as e:
+        fail(f"failed to copy: {e}")
+
+    editor = os.environ.get("VISUAL") or os.environ.get("EDITOR")
+    if not editor:
+        for candidate in ("nvim", "vim", "vi"):
+            if shutil.which(candidate):
+                editor = candidate
+                break
+
+    if not editor:
+        print("  no editor found — set $EDITOR or open the file manually.")
+        wait_for_enter()
+        sys.exit(0)
+
+    print(f"  Opening in {editor}...")
+    subprocess.call([editor, dest])
+    print(f"  ✓ '{name}' now in the list")
+    wait_for_enter()
+
 
 try:
-    name = input("  Name for the new theme: ").strip()
-except EOFError:
-    name = ""
-
-if not name:
-    fail("name is required")
-
-if name.endswith(".toml"):
-    name = name[:-5]
-
-if not re.match(r"^[a-zA-Z0-9_-]+$", name):
-    fail("name must contain only letters, digits, _ or -")
-
-dest = os.path.join(themes_dir, name + ".toml")
-if os.path.exists(dest):
-    fail(f"'{name}.toml' already exists at {dest}")
-
-try:
-    shutil.copyfile(source, dest)
-    print(f"  ✓ created {dest}")
-except Exception as e:
-    fail(f"failed to copy: {e}")
-
-editor = os.environ.get("VISUAL") or os.environ.get("EDITOR")
-if not editor:
-    for candidate in ("nvim", "vim", "vi"):
-        if shutil.which(candidate):
-            editor = candidate
-            break
-
-if not editor:
-    print("  no editor found — set $EDITOR or open the file manually.")
-    if WAIT: input("  Press Enter to continue...")
-    sys.exit(0)
-
-print(f"  Opening in {editor}...")
-subprocess.call([editor, dest])
-print(f"  ✓ '{name}' now in the list")
-if WAIT: input("  Press Enter to return to tpick...")
+    main()
+except KeyboardInterrupt:
+    # Any stray Ctrl-C not caught by safe_input above.
+    print("\n  cancelled")
+    wait_for_enter()
+    sys.exit(130)

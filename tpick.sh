@@ -141,8 +141,21 @@ _tpick_alacritty() {
     return 1
   fi
 
-  local original
-  original=$(grep '^import' "$config" 2>/dev/null | grep -oE '"[^"]*\.toml"' | tr -d '"')
+  # Snapshot the FULL alacritty.toml before opening the picker.
+  # We also extract the import path for the Ctrl-X "protected" check.
+  # The full snapshot is what we'll restore on cancel — restoring just the
+  # import line is racy because focus:execute-silent runs async, and a stray
+  # set_theme.py finishing AFTER our restore would overwrite us.
+  local original_config
+  original_config="$(<"$config")"
+
+  local original="" line
+  while IFS= read -r line; do
+    [[ "$line" == *import*=*\"*.toml\"* ]] || continue
+    original="${line#*\"}"
+    original="${original%%\"*}"
+    break
+  done <<< "$original_config"
   original="${original/#\~/$HOME}"
 
   local header
@@ -157,34 +170,85 @@ _tpick_alacritty() {
   local new_py="$TPICK_DIR/_new_theme.py"
   local remove_py="$TPICK_DIR/_remove_theme.py"
 
-  local selected
-  selected=$(
-    echo "$theme_list" | \
-    fzf \
-      --ansi \
-      --layout=reverse \
-      --delimiter=$'\t' \
-      --with-nth=1 \
-      --preview "python3 $preview_py \$(echo {2})" \
-      --preview-window="right:55%:wrap" \
-      --bind "focus:execute-silent(python3 $set_py $config \$(echo {2}))" \
-      --bind "tab:down,shift-tab:up" \
-      --bind "ctrl-d:half-page-down,ctrl-u:half-page-up" \
-      --bind "ctrl-f:execute-silent(python3 $toggle_fav_py \$(echo {2}))+reload(python3 $list_py $config_dir $filter_arg)" \
-      --bind "ctrl-n:execute(python3 $new_py \$(echo {2}) --wait)+reload(python3 $list_py $config_dir $filter_arg)" \
-      --bind "ctrl-x:execute(python3 $remove_py \$(echo {2}) '$original' --wait)+reload(python3 $list_py $config_dir $filter_arg)" \
-      --prompt "  Theme › " \
-      --header "$header"
-  )
+  # We avoid execute() for Ctrl-N/Ctrl-X because in some terminals fzf doesn't
+  # survive when the child receives SIGINT (Ctrl-C inside the helper takes the
+  # picker down too). Instead we use --expect: fzf exits cleanly on those keys,
+  # the helper runs in the normal shell, and the loop re-opens the picker.
+  local current_query="" out key sel selected_path
+  while true; do
+    out=$(
+      echo "$theme_list" | \
+      fzf \
+        --ansi \
+        --layout=reverse \
+        --delimiter=$'\t' \
+        --with-nth=1 \
+        --preview "python3 $preview_py \$(echo {2})" \
+        --preview-window="right:55%:wrap" \
+        --expect "ctrl-n,ctrl-x" \
+        --bind "focus:execute-silent(python3 $set_py $config \$(echo {2}))" \
+        --bind "tab:down,shift-tab:up" \
+        --bind "ctrl-d:half-page-down,ctrl-u:half-page-up" \
+        --bind "ctrl-f:execute-silent(python3 $toggle_fav_py \$(echo {2}))+reload(python3 $list_py $config_dir $filter_arg)" \
+        --prompt "  Theme › " \
+        --header "$header" \
+        --query "$current_query" \
+        --print-query
+    )
+    # --print-query: query is line 1
+    # --expect:      key (or empty for Enter) is line 2
+    # selection:                              is line 3 (empty on Esc/Ctrl-C)
+    current_query=$(echo "$out" | sed -n 1p)
+    key=$(echo "$out"            | sed -n 2p)
+    sel=$(echo "$out"            | sed -n 3p)
 
-  if [[ -n "$selected" ]]; then
-    local selected_path
-    selected_path=$(echo "$selected" | cut -f2)
+    case "$key" in
+      ctrl-n)
+        if [[ -n "$sel" ]]; then
+          pkill -f "${TPICK_DIR}/set_theme.py" 2>/dev/null
+          sleep 0.1
+          local src_path="${sel#*$'\t'}"
+          python3 "$new_py" "$src_path"
+        fi
+        # Refresh list (in case a new theme was created) and reopen.
+        theme_list=$(python3 "$list_py" "$config_dir" "$filter_arg")
+        continue
+        ;;
+      ctrl-x)
+        if [[ -n "$sel" ]]; then
+          pkill -f "${TPICK_DIR}/set_theme.py" 2>/dev/null
+          sleep 0.1
+          local tgt_path="${sel#*$'\t'}"
+          python3 "$remove_py" "$tgt_path" "$original"
+        fi
+        # If the user just removed the theme being live-previewed, restore the
+        # snapshot so we don't reopen pointing at a missing file.
+        if [[ ! -f "$original" ]] || [[ "$(<"$config")" != "$original_config" ]]; then
+          printf '%s' "$original_config" > "$config"
+        fi
+        theme_list=$(python3 "$list_py" "$config_dir" "$filter_arg")
+        continue
+        ;;
+      "")
+        # Enter (sel set) or Esc/Ctrl-C (sel empty)
+        break
+        ;;
+    esac
+  done
+
+  if [[ -n "$sel" ]]; then
+    selected_path="${sel#*$'\t'}"
+    pkill -f "${TPICK_DIR}/set_theme.py" 2>/dev/null
+    sleep 0.1
     python3 "$set_py" "$config" "$selected_path"
     _tpick_sync "$selected_path"
-    echo "  $(basename "$selected_path" .toml)"
-  elif [[ -n "$original" ]]; then
-    python3 "$set_py" "$config" "$original"
+    local sel_name="${selected_path##*/}"
+    echo "  ${sel_name%.toml}"
+  else
+    # Cancelled — restore snapshot verbatim.
+    pkill -f "${TPICK_DIR}/set_theme.py" 2>/dev/null
+    sleep 0.15
+    printf '%s' "$original_config" > "$config"
   fi
 }
 
@@ -235,6 +299,8 @@ _tpick_update() {
 # helper, which does the prompt + copy + editor flow.
 
 _tpick_new() {
+  local preset_name="${1:-}"
+
   local config="${ALACRITTY_CONFIG:-$HOME/.config/alacritty/alacritty.toml}"
   if [[ ! -f "$config" ]]; then
     echo "tpick: alacritty config not found: $config" >&2
@@ -261,7 +327,11 @@ _tpick_new() {
     return 1
   fi
 
-  python3 "$TPICK_DIR/_new_theme.py" "$src"
+  if [[ -n "$preset_name" ]]; then
+    python3 "$TPICK_DIR/_new_theme.py" "$src" "$preset_name"
+  else
+    python3 "$TPICK_DIR/_new_theme.py" "$src"
+  fi
 }
 
 # ── Remove theme ──────────────────────────────────────────────────────────────
