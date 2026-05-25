@@ -225,6 +225,158 @@ _tpick_update() {
   python3 "$TPICK_DIR/fetch_themes.py"
 }
 
+# ── New custom theme (copy + open in editor) ──────────────────────────────────
+
+_tpick_new() {
+  local new_name="${1:-}"
+  if [[ -z "$new_name" ]]; then
+    printf "  Name for the new theme: "
+    read -r new_name
+  fi
+  if [[ -z "$new_name" ]]; then
+    echo "tpick new: name is required" >&2
+    return 1
+  fi
+  if [[ ! "$new_name" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+    echo "tpick new: name must contain only letters, digits, _ or -" >&2
+    return 1
+  fi
+
+  local config="${ALACRITTY_CONFIG:-$HOME/.config/alacritty/alacritty.toml}"
+  if [[ ! -f "$config" ]]; then
+    echo "tpick: alacritty config not found: $config" >&2
+    return 1
+  fi
+
+  # Extract the path currently imported (builtins only — no grep/head/tr).
+  local line src=""
+  while IFS= read -r line; do
+    [[ "$line" == *import*=*\"*.toml\"* ]] || continue
+    src="${line#*\"}"
+    src="${src%%\"*}"
+    break
+  done < "$config"
+
+  if [[ -z "$src" ]]; then
+    echo "tpick: no theme import found in $config" >&2
+    return 1
+  fi
+  src="${src/#\~/$HOME}"
+
+  if [[ ! -f "$src" ]]; then
+    echo "tpick: source theme file not found: $src" >&2
+    return 1
+  fi
+
+  local themes_dir="${TPICK_THEMES_DIR:-$HOME/.local/share/tpick/themes}"
+  local dest="$themes_dir/$new_name.toml"
+
+  if [[ -e "$dest" ]]; then
+    echo "tpick new: '$new_name.toml' already exists at $dest" >&2
+    echo "  Open it directly to edit, or choose a different name." >&2
+    return 1
+  fi
+
+  mkdir -p "$themes_dir" || return 1
+  cp "$src" "$dest" || { echo "tpick: copy failed" >&2; return 1; }
+
+  # Editor: $VISUAL > $EDITOR > probe nvim → vim → vi
+  local editor="${VISUAL:-${EDITOR:-}}"
+  if [[ -z "$editor" ]]; then
+    for e in nvim vim vi; do
+      if _tpick_have "$e"; then editor="$e"; break; fi
+    done
+  fi
+
+  echo "  ✓ created $dest (copied from $(basename "$src" .toml))"
+
+  if [[ -z "$editor" ]]; then
+    echo "  No editor found — set \$EDITOR or open the file manually."
+    return 0
+  fi
+
+  echo "  Opening in $editor..."
+  "$editor" "$dest"
+  echo "  ✓ '$new_name' is now available in 'tpick'"
+}
+
+# ── Remove theme ──────────────────────────────────────────────────────────────
+
+_tpick_remove() {
+  local name="${1:-}"
+  if [[ -z "$name" ]]; then
+    printf "  Theme to remove: "
+    read -r name
+  fi
+  if [[ -z "$name" ]]; then
+    echo "tpick remove: name is required" >&2
+    return 1
+  fi
+  name="${name%.toml}"  # strip .toml if user typed it
+
+  if [[ "$name" == "alacritty" ]]; then
+    echo "tpick remove: refusing to remove 'alacritty.toml' (the config itself)" >&2
+    return 1
+  fi
+
+  local config="${ALACRITTY_CONFIG:-$HOME/.config/alacritty/alacritty.toml}"
+  local config_dir="${config%/*}"
+  local themes_dir="${TPICK_THEMES_DIR:-$HOME/.local/share/tpick/themes}"
+
+  local target="" dir
+  for dir in "$themes_dir" "$config_dir"; do
+    if [[ -f "$dir/$name.toml" ]]; then
+      target="$dir/$name.toml"
+      break
+    fi
+  done
+
+  if [[ -z "$target" ]]; then
+    echo "tpick remove: theme '$name' not found" >&2
+    echo "  Checked: $themes_dir, $config_dir" >&2
+    return 1
+  fi
+
+  # Block removing the currently applied theme.
+  local current
+  current=$(_tpick_current 2>/dev/null)
+  if [[ "$current" == "$name" ]]; then
+    echo "tpick remove: '$name' is the currently applied theme." >&2
+    echo "  Switch to another theme first (run 'tpick')." >&2
+    return 1
+  fi
+
+  printf "  Remove %s? [y/N] " "$target"
+  local yn
+  read -r yn
+  case "$yn" in
+    y|Y|yes|YES) ;;
+    *) echo "  aborted"; return 1 ;;
+  esac
+
+  if ! rm "$target"; then
+    echo "tpick: failed to remove $target" >&2
+    return 1
+  fi
+  echo "  ✓ removed $target"
+
+  # Scrub the favorites file (builtins only — no grep/sed).
+  if [[ -f "$TPICK_FAVORITES" ]]; then
+    local rebuilt="" line had_fav=0
+    while IFS= read -r line; do
+      if [[ "$line" == "$name.toml" ]]; then
+        had_fav=1
+      else
+        rebuilt+="$line"$'\n'
+      fi
+    done < "$TPICK_FAVORITES"
+    if (( had_fav )); then
+      printf '%s' "$rebuilt" > "$TPICK_FAVORITES"
+      echo "  ✓ removed from favorites"
+    fi
+  fi
+}
+
 # ── Current theme ─────────────────────────────────────────────────────────────
 
 _tpick_current() {
@@ -347,6 +499,12 @@ tpick() {
     current)
       _tpick_current
       ;;
+    new)
+      _tpick_new "${2:-}"
+      ;;
+    remove|rm)
+      _tpick_remove "${2:-}"
+      ;;
     fav|favs|favorites)
       if [[ -f "$TPICK_FAVORITES" ]] && [[ -s "$TPICK_FAVORITES" ]]; then
         echo "  Favorites:"
@@ -384,6 +542,8 @@ USAGE
   tpick random --light   Apply a random light theme
   tpick fav              List your favorites
   tpick current          Print the currently applied theme name
+  tpick new [name]       Copy current theme as a new one and open in $EDITOR
+  tpick remove [name]    Remove a theme file (asks confirmation)
   tpick fetch            Download themes from alacritty/alacritty-theme
   tpick update           Update tpick and download new themes
   tpick --alacritty      Force Alacritty mode
