@@ -202,7 +202,7 @@ _tpick_random() {
   chosen=$(
     python3 "$TPICK_DIR/list_themes.py" "$config_dir" "$filter_arg" \
       | cut -f2 \
-      | shuf -n1
+      | python3 -c "import sys,random; lines=[l.rstrip() for l in sys.stdin if l.strip()]; print(random.choice(lines)) if lines else sys.exit(1)"
   )
 
   if [[ -z "$chosen" ]]; then
