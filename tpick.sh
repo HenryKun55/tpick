@@ -225,6 +225,39 @@ _tpick_update() {
   python3 "$TPICK_DIR/fetch_themes.py"
 }
 
+# ── Current theme ─────────────────────────────────────────────────────────────
+
+_tpick_current() {
+  local terminal config line name
+  terminal=$(_tpick_detect_terminal)
+
+  case "$terminal" in
+    alacritty)
+      config="${ALACRITTY_CONFIG:-$HOME/.config/alacritty/alacritty.toml}"
+      if [[ ! -f "$config" ]]; then
+        echo "tpick: alacritty config not found: $config" >&2
+        return 1
+      fi
+      # Parse com builtins só — não depende de grep/head/tr/basename.
+      while IFS= read -r line; do
+        [[ "$line" == *import*=*\"*.toml\"* ]] || continue
+        name="${line#*\"}"   # tira tudo até a primeira aspas
+        name="${name%%\"*}"  # tira da próxima aspas em diante
+        name="${name##*/}"   # basename
+        name="${name%.toml}" # tira extensão
+        echo "$name"
+        return 0
+      done < "$config"
+      echo "tpick: no theme import found in $config" >&2
+      return 1
+      ;;
+    *)
+      echo "tpick: 'current' is only supported for alacritty (detected: ${terminal:-none})" >&2
+      return 1
+      ;;
+  esac
+}
+
 # ── Claude Code picker ────────────────────────────────────────────────────────
 
 _tpick_claude() {
@@ -311,6 +344,9 @@ tpick() {
     update)
       _tpick_update
       ;;
+    current)
+      _tpick_current
+      ;;
     fav|favs|favorites)
       if [[ -f "$TPICK_FAVORITES" ]] && [[ -s "$TPICK_FAVORITES" ]]; then
         echo "  Favorites:"
@@ -347,6 +383,7 @@ USAGE
   tpick random --dark    Apply a random dark theme
   tpick random --light   Apply a random light theme
   tpick fav              List your favorites
+  tpick current          Print the currently applied theme name
   tpick fetch            Download themes from alacritty/alacritty-theme
   tpick update           Update tpick and download new themes
   tpick --alacritty      Force Alacritty mode
