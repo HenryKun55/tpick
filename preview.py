@@ -15,14 +15,6 @@ def on_bg(bgc, fgc, text):
     fr, fg2, fb = hex_to_rgb(fgc)
     return f"\033[48;2;{br};{bg2};{bb}m\033[38;2;{fr};{fg2};{fb}m{text}\033[0m"
 
-def blend(hex_color, hex_base, alpha=0.20):
-    """Mix hex_color into hex_base at given opacity — simulates a tinted diff bg."""
-    cr, cg, cb = hex_to_rgb(hex_color)
-    br, bg2, bb = hex_to_rgb(hex_base)
-    r = int(br + (cr - br) * alpha)
-    g = int(bg2 + (cg - bg2) * alpha)
-    b = int(bb + (cb - bb) * alpha)
-    return f"#{r:02x}{g:02x}{b:02x}"
 
 def parse(path):
     colors, section = {}, ""
@@ -53,11 +45,6 @@ def main():
     c = parse(path)
     bg  = c.get("colors.primary.background", "#1a1a1a")
     fg  = c.get("colors.primary.foreground", "#f0f0f0")
-    red = c.get("colors.normal.red",   "#ff5555")
-    grn = c.get("colors.normal.green", "#55ff55")
-    yel = c.get("colors.normal.yellow","#ffff55")
-    blu = c.get("colors.normal.blue",  "#5555ff")
-    cyn = c.get("colors.normal.cyan",  "#55ffff")
     r, g, b = hex_to_rgb(bg)
     fr, fg2, fb = hex_to_rgb(fg)
 
@@ -89,30 +76,37 @@ def main():
         print()
 
     # ── Claude Code mock ──────────────────────────────────────────────────────
-    add_bg = blend(grn, bg, 0.22)
-    rem_bg = blend(red, bg, 0.22)
-    dim_fg = blend(fg, bg, 0.45)
+    # Claude Code dark theme fixed colors — independent of terminal theme
+    CC_BG      = "#1e1e1e"
+    CC_FG      = "#d4d4d4"
+    CC_REM_BG  = "#3d1515"   # dark red   background for removed lines
+    CC_ADD_BG  = "#153d15"   # dark green background for added lines
+    CC_REM_FG  = "#f87171"   # red   text on removed lines
+    CC_ADD_FG  = "#4ade80"   # green text on added lines
+    CC_DIM     = "#6b6b6b"   # unchanged lines
+    CC_BLUE    = "#60a5fa"   # tool call dot
+    CC_YELLOW  = "#fbbf24"   # bash dot
 
     print(f"  \033[2m{'─' * 38}\033[0m")
     print(f"  \033[2mClaude Code preview\033[0m")
     print()
 
     # Tool call line
-    print(f"  {on_bg(bg, blu, '● ')}  {on_bg(bg, fg, 'Edit')}  \033[2msrc/app.ts\033[0m")
+    print(f"  {on_bg(CC_BG, CC_BLUE, '● ')}  {on_bg(CC_BG, CC_FG, 'Edit')}  \033[2msrc/app.ts\033[0m")
     print()
 
     # Diff block
     W = 36
-    l_rem = f"  {'- const x = oldValue':<{W}}"
-    l_unch= f"  {'  const y = value':<{W}}"
-    l_add = f"  {'+  const x = newValue':<{W}}"
-    print(f"  {on_bg(rem_bg, red,    l_rem)}")
-    print(f"  {on_bg(bg,     dim_fg, l_unch)}")
-    print(f"  {on_bg(add_bg, grn,    l_add)}")
+    l_rem  = f"  {'- const x = oldValue':<{W}}"
+    l_unch = f"  {'  const y = value':<{W}}"
+    l_add  = f"  {'+  const x = newValue':<{W}}"
+    print(f"  {on_bg(CC_REM_BG, CC_REM_FG, l_rem)}")
+    print(f"  {on_bg(CC_BG,     CC_DIM,    l_unch)}")
+    print(f"  {on_bg(CC_ADD_BG, CC_ADD_FG, l_add)}")
     print()
 
     # Tool output line
-    print(f"  {on_bg(bg, yel, '●')}  \033[2mBash\033[0m  \033[2mnpm run build\033[0m")
+    print(f"  {on_bg(CC_BG, CC_YELLOW, '●')}  \033[2mBash\033[0m  \033[2mnpm run build\033[0m")
     print(f"  \033[2m  └ Build successful in 1.2s\033[0m")
     print()
 
