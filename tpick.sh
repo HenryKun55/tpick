@@ -46,18 +46,14 @@ _tpick_sync_nvim() {
     *)                     cs="$theme_name" ;;
   esac
 
-  # Find running nvim instances via socket
+  # Find running nvim instances via socket (avoid globs — zsh throws on no match)
   local sock
-  for sock in \
-    "${NVIM:-}" \
-    /tmp/nvim*/0 \
-    /tmp/nvim.*/0 \
-    "${XDG_RUNTIME_DIR:-/tmp}/nvim"* \
-    "${TMPDIR:-/tmp}"/../C/nvim*/0
-  do
+  [[ -S "${NVIM:-}" ]] && \
+    nvim --server "$NVIM" --remote-send ":colorscheme $cs<CR>" 2>/dev/null || true
+  while IFS= read -r sock; do
     [[ -S "$sock" ]] || continue
     nvim --server "$sock" --remote-send ":colorscheme $cs<CR>" 2>/dev/null || true
-  done
+  done < <(find /tmp "${XDG_RUNTIME_DIR:-/tmp}" -maxdepth 4 -name "0" -path "*/nvim*" 2>/dev/null)
 }
 
 _tpick_sync_tmux() {
