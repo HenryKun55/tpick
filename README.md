@@ -47,11 +47,19 @@ source ~/.zshrc
 ## Usage
 
 ```bash
-tpick              # auto-detect terminal and open picker
-tpick fetch        # download themes from alacritty/alacritty-theme
-tpick --alacritty  # force Alacritty mode
-tpick --claude     # Claude Code theme picker
-tpick --help       # show all options
+tpick                  # auto-detect terminal and open picker
+tpick --dark           # show only dark themes
+tpick --light          # show only light themes
+tpick --favorites      # show only your starred themes
+tpick random           # apply a random theme
+tpick random --dark    # apply a random dark theme
+tpick random --light   # apply a random light theme
+tpick fav              # list your favorites
+tpick fetch            # download themes from alacritty/alacritty-theme
+tpick update           # update tpick itself and download new themes
+tpick --alacritty      # force Alacritty mode
+tpick --claude         # Claude Code theme picker
+tpick --help           # show all options
 ```
 
 **Controls inside the picker:**
@@ -60,10 +68,10 @@ tpick --help       # show all options
 |---|---|
 | `↑` / `↓` or `Tab` / `Shift-Tab` | Navigate — theme applies live |
 | `Ctrl-D` / `Ctrl-U` | Scroll half-page down/up (fast browsing) |
+| `Ctrl-F` | Toggle ★ favorite (list updates instantly) |
 | `Enter` | Confirm and keep the theme |
 | `Esc` | Cancel and restore your original theme |
 | `/` + type | Search by name |
-| Mouse scroll | Also works |
 
 ---
 
@@ -84,6 +92,26 @@ tpick --help       # show all options
 | WezTerm | 🔜 Coming soon |
 
 Works on macOS and Linux (including WSL).
+
+---
+
+## Sync
+
+After you confirm a theme, tpick automatically syncs it everywhere:
+
+- **Neovim** — sends `:colorscheme` to every running instance via `--server` (works with catppuccin, dracula, nord, gruvbox, tokyonight, onedark, everforest, rose-pine, kanagawa, nightfox and more)
+- **tmux** — updates the status bar background, foreground, and active border to match the new palette
+
+**Custom hook:** define `tpick_on_change()` in `~/.tpick/hooks.sh` and it'll be called after every theme change with the theme name and path as arguments:
+
+```bash
+# ~/.tpick/hooks.sh
+tpick_on_change() {
+  local theme_name="$1"   # e.g. "catppuccin_mocha"
+  local theme_path="$2"   # e.g. "/path/to/catppuccin_mocha.toml"
+  # do whatever you want here
+}
+```
 
 ---
 
@@ -112,10 +140,7 @@ Drop a `.json` file in `~/.claude/themes/`:
 }
 ```
 
-Then set it in `~/.claude/settings.json`:
-```json
-{ "theme": "custom:my-theme" }
-```
+Then run `tpick --claude` and select `custom:my-theme`.
 
 ---
 
@@ -125,11 +150,13 @@ Drop any `.toml` file with Alacritty color definitions next to your `alacritty.t
 
 ---
 
-## Custom paths
+## Environment variables
 
 ```bash
+export TPICK_DIR="$HOME/.tpick"                            # install location
+export TPICK_THEMES_DIR="$HOME/.local/share/tpick/themes"  # downloaded themes
+export TPICK_FAVORITES="$HOME/.local/share/tpick/favorites" # favorites list
 export ALACRITTY_CONFIG="$HOME/.config/alacritty/alacritty.toml"
-export TPICK_THEMES_DIR="$HOME/.local/share/tpick/themes"
 ```
 
 ---
