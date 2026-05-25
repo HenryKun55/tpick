@@ -53,13 +53,16 @@ _tpick_alacritty() {
     echo "$theme_list" | \
     fzf \
       --ansi \
+      --layout=reverse \
       --delimiter=$'\t' \
       --with-nth=1 \
       --preview "python3 $preview_py \$(echo {2})" \
       --preview-window="right:55%:wrap" \
       --bind "focus:execute-silent(python3 $set_py $config \$(echo {2}))" \
+      --bind "tab:down,shift-tab:up" \
+      --bind "ctrl-d:half-page-down,ctrl-u:half-page-up" \
       --prompt "  Theme › " \
-      --header $'↑↓ navigate  ·  Enter select  ·  Esc restore\n  Run tpick fetch to download 174 themes'
+      --header $'↑↓/Tab  navigate  ·  Ctrl-D/U  scroll fast  ·  Enter  select  ·  Esc  restore'
   )
 
   if [[ -n "$selected" ]]; then
@@ -69,6 +72,74 @@ _tpick_alacritty() {
     echo "  $(basename "$selected_path" .toml)"
   elif [[ -n "$original" ]]; then
     python3 "$set_py" "$config" "$original"
+  fi
+}
+
+_tpick_claude() {
+  local themes_dir="${HOME}/.claude/themes"
+  local settings="${HOME}/.claude/settings.json"
+  local set_py="$TPICK_DIR/set_claude_theme.py"
+  local preview_py="$TPICK_DIR/preview_claude.py"
+
+  [[ ! -f "$settings" ]] && { echo "tpick: ~/.claude/settings.json not found" >&2; return 1; }
+
+  mkdir -p "$themes_dir"
+
+  # Built-in themes (always available)
+  local builtins="dark
+light
+dark-daltonism
+light-daltonism"
+
+  # Custom themes from ~/.claude/themes/
+  local custom_themes=""
+  if [[ -d "$themes_dir" ]]; then
+    custom_themes=$(find "$themes_dir" -maxdepth 1 -name "*.json" \
+      | while IFS= read -r f; do
+          local name; name=$(basename "$f" .json)
+          printf "custom:%s\t%s\n" "$name" "$f"
+        done | sort)
+  fi
+
+  local theme_list
+  theme_list=$(
+    echo "$builtins" | while IFS= read -r t; do printf "%s\t(built-in)\n" "$t"; done
+    [[ -n "$custom_themes" ]] && echo "$custom_themes"
+  )
+
+  local original
+  original=$(python3 -c "
+import json, sys
+try:
+  s = json.load(open('$settings'))
+  print(s.get('theme','dark'))
+except: print('dark')
+" 2>/dev/null)
+
+  local selected
+  selected=$(
+    echo "$theme_list" | \
+    fzf \
+      --ansi \
+      --layout=reverse \
+      --delimiter=$'\t' \
+      --with-nth=1 \
+      --preview "python3 $preview_py {1} {2}" \
+      --preview-window="right:50%:wrap" \
+      --bind "focus:execute-silent(python3 $set_py $settings {1})" \
+      --bind "tab:down,shift-tab:up" \
+      --bind "ctrl-d:half-page-down,ctrl-u:half-page-up" \
+      --prompt "  Claude Code Theme › " \
+      --header $'↑↓/Tab  navigate  ·  Enter  select  ·  Esc  restore'
+  )
+
+  if [[ -n "$selected" ]]; then
+    local theme_name
+    theme_name=$(echo "$selected" | cut -f1)
+    python3 "$set_py" "$settings" "$theme_name"
+    echo "  $theme_name (restart Claude Code to apply)"
+  else
+    python3 "$set_py" "$settings" "$original"
   fi
 }
 
@@ -92,6 +163,9 @@ tpick() {
     --alacritty|-a)
       _tpick_alacritty
       ;;
+    --claude|-c)
+      _tpick_claude
+      ;;
     --help|-h|help)
       cat <<'EOF'
 tpick — terminal theme picker
@@ -102,10 +176,11 @@ USAGE
   tpick --alacritty  Force Alacritty mode
 
 CONTROLS
-  ↑↓        Navigate (live preview in terminal)
-  Enter     Confirm selection
-  Esc       Cancel and restore original theme
-  /         Search by name
+  ↑↓ / Tab    Navigate (live preview updates as you move)
+  Ctrl-D/U    Scroll half-page down/up (fast browsing)
+  Enter       Confirm selection
+  Esc         Cancel and restore original theme
+  /           Search by name
 
 ENVIRONMENT
   TPICK_DIR         tpick install dir     (default: ~/.tpick)

@@ -50,6 +50,7 @@ source ~/.zshrc
 tpick              # auto-detect terminal and open picker
 tpick fetch        # download 174 themes from alacritty/alacritty-theme
 tpick --alacritty  # force Alacritty mode
+tpick --claude     # Claude Code theme picker
 tpick --help       # show all options
 ```
 
@@ -57,10 +58,12 @@ tpick --help       # show all options
 
 | Key | Action |
 |---|---|
-| `↑` / `↓` | Navigate — theme applies live |
+| `↑` / `↓` or `Tab` / `Shift-Tab` | Navigate — theme applies live |
+| `Ctrl-D` / `Ctrl-U` | Scroll half-page down/up (fast when you have 174 themes) |
 | `Enter` | Confirm and keep the theme |
 | `Esc` | Cancel and restore your original theme |
-| `/` | Search by name |
+| `/` + type | Search by name |
+| Mouse scroll | Also works |
 
 ---
 
@@ -81,6 +84,38 @@ tpick --help       # show all options
 | WezTerm | 🔜 Coming soon |
 
 Works on macOS and Linux (including WSL).
+
+---
+
+## Claude Code themes
+
+```bash
+tpick --claude
+```
+
+Picks from Claude Code's built-in themes (`dark`, `light`, `dark-daltonism`, `light-daltonism`) plus any custom themes you have in `~/.claude/themes/`. The preview shows how the diff colors and accent palette will look.
+
+> Claude Code doesn't live-reload themes — you need to restart it after changing. The picker updates `~/.claude/settings.json` for you.
+
+**Creating a custom theme:**
+
+Drop a `.json` file in `~/.claude/themes/`:
+
+```json
+{
+  "name": "my-theme",
+  "base": "dark",
+  "overrides": {
+    "green_FOR_SUBAGENTS_ONLY": "rgb(34, 197, 94)",
+    "red_FOR_SUBAGENTS_ONLY": "rgb(239, 68, 68)"
+  }
+}
+```
+
+Then set it in `~/.claude/settings.json`:
+```json
+{ "theme": "custom:my-theme" }
+```
 
 ---
 
