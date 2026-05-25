@@ -152,7 +152,10 @@ _tpick_alacritty() {
     --favorites) header="★ favorites  ·  " ;;
     *)           header="" ;;
   esac
-  header="${header}↑↓/Tab navigate  ·  Ctrl-D/U scroll  ·  Ctrl-F favorite  ·  Enter select  ·  Esc restore"
+  header="${header}↑↓/Tab navigate  ·  Ctrl-F favorite  ·  Ctrl-N new  ·  Ctrl-X remove  ·  Enter select  ·  Esc restore"
+
+  local new_py="$TPICK_DIR/_new_theme.py"
+  local remove_py="$TPICK_DIR/_remove_theme.py"
 
   local selected
   selected=$(
@@ -168,6 +171,8 @@ _tpick_alacritty() {
       --bind "tab:down,shift-tab:up" \
       --bind "ctrl-d:half-page-down,ctrl-u:half-page-up" \
       --bind "ctrl-f:execute-silent(python3 $toggle_fav_py \$(echo {2}))+reload(python3 $list_py $config_dir $filter_arg)" \
+      --bind "ctrl-n:execute(python3 $new_py \$(echo {2}) --wait)+reload(python3 $list_py $config_dir $filter_arg)" \
+      --bind "ctrl-x:execute(python3 $remove_py \$(echo {2}) '$original' --wait)+reload(python3 $list_py $config_dir $filter_arg)" \
       --prompt "  Theme › " \
       --header "$header"
   )
@@ -226,29 +231,17 @@ _tpick_update() {
 }
 
 # ── New custom theme (copy + open in editor) ──────────────────────────────────
+# Shell wrapper: figures out the current theme path and delegates to the Python
+# helper, which does the prompt + copy + editor flow.
 
 _tpick_new() {
-  local new_name="${1:-}"
-  if [[ -z "$new_name" ]]; then
-    printf "  Name for the new theme: "
-    read -r new_name
-  fi
-  if [[ -z "$new_name" ]]; then
-    echo "tpick new: name is required" >&2
-    return 1
-  fi
-  if [[ ! "$new_name" =~ ^[a-zA-Z0-9_-]+$ ]]; then
-    echo "tpick new: name must contain only letters, digits, _ or -" >&2
-    return 1
-  fi
-
   local config="${ALACRITTY_CONFIG:-$HOME/.config/alacritty/alacritty.toml}"
   if [[ ! -f "$config" ]]; then
     echo "tpick: alacritty config not found: $config" >&2
     return 1
   fi
 
-  # Extract the path currently imported (builtins only — no grep/head/tr).
+  # Extract the currently-imported theme path (builtins only).
   local line src=""
   while IFS= read -r line; do
     [[ "$line" == *import*=*\"*.toml\"* ]] || continue
@@ -258,61 +251,31 @@ _tpick_new() {
   done < "$config"
 
   if [[ -z "$src" ]]; then
-    echo "tpick: no theme import found in $config" >&2
+    echo "tpick new: no theme import found in $config" >&2
     return 1
   fi
   src="${src/#\~/$HOME}"
 
   if [[ ! -f "$src" ]]; then
-    echo "tpick: source theme file not found: $src" >&2
+    echo "tpick new: source theme file not found: $src" >&2
     return 1
   fi
 
-  local themes_dir="${TPICK_THEMES_DIR:-$HOME/.local/share/tpick/themes}"
-  local dest="$themes_dir/$new_name.toml"
-
-  if [[ -e "$dest" ]]; then
-    echo "tpick new: '$new_name.toml' already exists at $dest" >&2
-    echo "  Open it directly to edit, or choose a different name." >&2
-    return 1
-  fi
-
-  mkdir -p "$themes_dir" || return 1
-  cp "$src" "$dest" || { echo "tpick: copy failed" >&2; return 1; }
-
-  # Editor: $VISUAL > $EDITOR > probe nvim → vim → vi
-  local editor="${VISUAL:-${EDITOR:-}}"
-  if [[ -z "$editor" ]]; then
-    for e in nvim vim vi; do
-      if _tpick_have "$e"; then editor="$e"; break; fi
-    done
-  fi
-
-  echo "  ✓ created $dest (copied from $(basename "$src" .toml))"
-
-  if [[ -z "$editor" ]]; then
-    echo "  No editor found — set \$EDITOR or open the file manually."
-    return 0
-  fi
-
-  echo "  Opening in $editor..."
-  "$editor" "$dest"
-  echo "  ✓ '$new_name' is now available in 'tpick'"
+  python3 "$TPICK_DIR/_new_theme.py" "$src"
 }
 
 # ── Remove theme ──────────────────────────────────────────────────────────────
+# Shell wrapper:
+#   - With a name arg: locates the file and delegates to _remove_theme.py.
+#   - Without args: opens a small fzf picker to choose the theme to remove.
 
 _tpick_remove() {
   local name="${1:-}"
   if [[ -z "$name" ]]; then
-    printf "  Theme to remove: "
-    read -r name
+    _tpick_remove_picker
+    return
   fi
-  if [[ -z "$name" ]]; then
-    echo "tpick remove: name is required" >&2
-    return 1
-  fi
-  name="${name%.toml}"  # strip .toml if user typed it
+  name="${name%.toml}"
 
   if [[ "$name" == "alacritty" ]]; then
     echo "tpick remove: refusing to remove 'alacritty.toml' (the config itself)" >&2
@@ -330,51 +293,86 @@ _tpick_remove() {
       break
     fi
   done
-
   if [[ -z "$target" ]]; then
     echo "tpick remove: theme '$name' not found" >&2
     echo "  Checked: $themes_dir, $config_dir" >&2
     return 1
   fi
 
-  # Block removing the currently applied theme.
+  # Pass the currently-applied path as "protected" so the helper blocks if it matches.
+  local protected="" line
+  while IFS= read -r line; do
+    [[ "$line" == *import*=*\"*.toml\"* ]] || continue
+    protected="${line#*\"}"
+    protected="${protected%%\"*}"
+    break
+  done < "$config"
+
+  python3 "$TPICK_DIR/_remove_theme.py" "$target" "$protected"
+}
+
+_tpick_remove_picker() {
+  if ! _tpick_have fzf; then
+    echo "tpick: fzf required" >&2
+    return 1
+  fi
+  if ! _tpick_have python3; then
+    echo "tpick: python3 required" >&2
+    return 1
+  fi
+
+  local config="${ALACRITTY_CONFIG:-$HOME/.config/alacritty/alacritty.toml}"
+  local config_dir="${config%/*}"
+  local list_py="$TPICK_DIR/list_themes.py"
+  local preview_py="$TPICK_DIR/preview.py"
+  local remove_py="$TPICK_DIR/_remove_theme.py"
+
   local current
   current=$(_tpick_current 2>/dev/null)
-  if [[ "$current" == "$name" ]]; then
-    echo "tpick remove: '$name' is the currently applied theme." >&2
-    echo "  Switch to another theme first (run 'tpick')." >&2
+
+  local theme_list
+  theme_list=$(python3 "$list_py" "$config_dir" "")
+
+  if [[ -z "$theme_list" ]]; then
+    echo "tpick remove: no themes found." >&2
     return 1
   fi
 
-  printf "  Remove %s? [y/N] " "$target"
-  local yn
-  read -r yn
-  case "$yn" in
-    y|Y|yes|YES) ;;
-    *) echo "  aborted"; return 1 ;;
-  esac
-
-  if ! rm "$target"; then
-    echo "tpick: failed to remove $target" >&2
-    return 1
-  fi
-  echo "  ✓ removed $target"
-
-  # Scrub the favorites file (builtins only — no grep/sed).
-  if [[ -f "$TPICK_FAVORITES" ]]; then
-    local rebuilt="" line had_fav=0
+  # Hide the currently-applied theme from the removal list.
+  if [[ -n "$current" ]]; then
+    local filtered="" line
     while IFS= read -r line; do
-      if [[ "$line" == "$name.toml" ]]; then
-        had_fav=1
-      else
-        rebuilt+="$line"$'\n'
-      fi
-    done < "$TPICK_FAVORITES"
-    if (( had_fav )); then
-      printf '%s' "$rebuilt" > "$TPICK_FAVORITES"
-      echo "  ✓ removed from favorites"
-    fi
+      [[ "$line" == *"/${current}.toml" ]] && continue
+      filtered+="$line"$'\n'
+    done <<< "$theme_list"
+    theme_list="${filtered%$'\n'}"
   fi
+
+  if [[ -z "$theme_list" ]]; then
+    echo "tpick remove: nothing to remove (only the current theme exists)." >&2
+    return 1
+  fi
+
+  local selected
+  selected=$(
+    echo "$theme_list" | \
+    fzf \
+      --ansi \
+      --layout=reverse \
+      --delimiter=$'\t' \
+      --with-nth=1 \
+      --preview "python3 $preview_py \$(echo {2})" \
+      --preview-window="right:55%:wrap" \
+      --prompt "  Remove › " \
+      --header "Pick a theme to remove  ·  Enter confirm  ·  Esc cancel  ·  (current theme hidden)"
+  )
+
+  [[ -z "$selected" ]] && { echo "  cancelled"; return 0; }
+
+  local target
+  target="${selected#*$'\t'}"
+
+  python3 "$remove_py" "$target"
 }
 
 # ── Current theme ─────────────────────────────────────────────────────────────
@@ -553,6 +551,8 @@ CONTROLS (inside picker)
   ↑↓ / Tab       Navigate (theme applies live)
   Ctrl-D / U     Scroll half-page down / up
   Ctrl-F         Toggle favorite ★
+  Ctrl-N         New theme — copy focused one and open in $EDITOR
+  Ctrl-X         Remove focused theme (asks confirmation)
   Enter          Confirm selection
   Esc            Cancel and restore original theme
   /              Search by name
