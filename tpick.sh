@@ -7,7 +7,10 @@ TPICK_THEMES_DIR="${TPICK_THEMES_DIR:-${HOME}/.local/share/tpick/themes}"
 TPICK_FAVORITES="${TPICK_FAVORITES:-${HOME}/.local/share/tpick/favorites}"
 TPICK_LAST_FILE="${TPICK_LAST_FILE:-${HOME}/.local/share/tpick/last}"
 TPICK_AUTO_DIR="${TPICK_AUTO_DIR:-${HOME}/.local/share/tpick/auto}"
-export TPICK_THEMES_DIR TPICK_FAVORITES TPICK_LAST_FILE TPICK_AUTO_DIR
+TPICK_HISTORY_FILE="${TPICK_HISTORY_FILE:-${HOME}/.local/share/tpick/history}"
+TPICK_BRIGHTNESS_CACHE="${TPICK_BRIGHTNESS_CACHE:-${HOME}/.local/share/tpick/brightness.cache.json}"
+export TPICK_THEMES_DIR TPICK_FAVORITES TPICK_LAST_FILE TPICK_AUTO_DIR \
+       TPICK_HISTORY_FILE TPICK_BRIGHTNESS_CACHE
 
 _tpick_have() { command -v "$1" &>/dev/null; }
 
@@ -48,6 +51,20 @@ _tpick_save_last() {
   [[ -z "$p" || ! -f "$p" ]] && return
   mkdir -p "${TPICK_LAST_FILE%/*}" 2>/dev/null
   printf '%s\n' "$p" > "$TPICK_LAST_FILE"
+}
+
+# Prepend a path to the MRU history, dedupe, keep top 100.
+# Used by list_themes.py to rank recent themes near the top.
+_tpick_history_push() {
+  local p="$1"
+  [[ -z "$p" ]] && return
+  mkdir -p "${TPICK_HISTORY_FILE%/*}" 2>/dev/null
+  local tmp="${TPICK_HISTORY_FILE}.tmp.$$"
+  {
+    printf '%s\n' "$p"
+    [[ -f "$TPICK_HISTORY_FILE" ]] && grep -vxF "$p" "$TPICK_HISTORY_FILE" 2>/dev/null
+  } | head -100 > "$tmp"
+  mv "$tmp" "$TPICK_HISTORY_FILE"
 }
 
 # Locate a theme file by name in the known theme dirs. Echoes the path.
@@ -334,6 +351,7 @@ _tpick_alacritty() {
     _tpick_sync "$selected_path"
     # Save what was active before, so `tpick last` toggles back here.
     [[ -n "$original" && "$original" != "$selected_path" ]] && _tpick_save_last "$original"
+    _tpick_history_push "$selected_path"
     local sel_name="${selected_path##*/}"
     echo "  ${sel_name%.toml}"
   else
@@ -372,6 +390,7 @@ _tpick_random() {
   python3 "$TPICK_DIR/set_theme.py" "$config" "$chosen"
   _tpick_sync "$chosen"
   [[ -n "$prev" && "$prev" != "$chosen" ]] && _tpick_save_last "$prev"
+  _tpick_history_push "$chosen"
   echo "  $(basename "$chosen" .toml)"
 }
 
@@ -596,6 +615,7 @@ _tpick_last() {
 
   # Swap: remember what was current before, so the next `tpick last` toggles back.
   [[ -n "$current_path" ]] && _tpick_save_last "$current_path"
+  _tpick_history_push "$last_path"
 
   local n="${last_path##*/}"
   echo "  ↶ ${n%.toml}"
@@ -642,6 +662,160 @@ _tpick_info() {
     }
   fi
   python3 "$TPICK_DIR/_theme_info.py" "$target"
+}
+
+# ── Share / import via gist ──────────────────────────────────────────────────
+
+_tpick_share() {
+  if ! _tpick_have gh; then
+    echo "tpick share: gh CLI required" >&2
+    echo "  brew install gh && gh auth login" >&2
+    return 1
+  fi
+
+  local target
+  if [[ -z "${1:-}" ]]; then
+    target=$(_tpick_current_path) || {
+      echo "tpick share: no current theme to share" >&2
+      return 1
+    }
+  else
+    target=$(_tpick_find_theme "$1") || {
+      echo "tpick share: theme '$1' not found" >&2
+      return 1
+    }
+  fi
+
+  local name="${target##*/}"
+  name="${name%.toml}"
+
+  local out url
+  out=$(gh gist create --public --desc "Alacritty theme: $name (via tpick)" "$target" 2>&1)
+  local rc=$?
+  if (( rc != 0 )); then
+    echo "tpick share: gh gist create failed" >&2
+    echo "$out" | sed 's/^/  /' >&2
+    return 1
+  fi
+
+  # `gh gist create` prints status lines, with the URL on the last line.
+  url=$(printf '%s\n' "$out" | tail -1)
+
+  echo "  ✓ shared: $url"
+
+  if _tpick_have pbcopy; then
+    printf '%s' "$url" | pbcopy
+    echo "  ✓ URL copied to clipboard"
+  elif _tpick_have wl-copy; then
+    printf '%s' "$url" | wl-copy
+    echo "  ✓ URL copied to clipboard"
+  fi
+}
+
+_tpick_export() {
+  local fmt="" name="" arg
+  for arg in "$@"; do
+    case "$arg" in
+      --kitty)   fmt="kitty" ;;
+      --ghostty) fmt="ghostty" ;;
+      --help|-h)
+        cat <<'EOF'
+tpick export [name] --kitty|--ghostty
+
+Convert an Alacritty TOML theme to kitty or ghostty config format and
+print it to stdout. Without [name], exports the currently-applied theme.
+
+Examples:
+  tpick export --kitty                       # current theme, kitty format
+  tpick export ayu_mirage --ghostty
+  tpick export --kitty > ~/.config/kitty/themes/current.conf
+EOF
+        return 0
+        ;;
+      --*) echo "tpick export: unknown flag '$arg'" >&2; return 1 ;;
+      *)   name="$arg" ;;
+    esac
+  done
+
+  if [[ -z "$fmt" ]]; then
+    echo "tpick export: missing format flag (--kitty or --ghostty)" >&2
+    echo "  See: tpick export --help" >&2
+    return 1
+  fi
+
+  local target
+  if [[ -z "$name" ]]; then
+    target=$(_tpick_current_path) || {
+      echo "tpick export: no current theme to export" >&2
+      return 1
+    }
+  else
+    target=$(_tpick_find_theme "$name") || {
+      echo "tpick export: theme '$name' not found" >&2
+      return 1
+    }
+  fi
+
+  python3 "$TPICK_DIR/_convert_theme.py" "$target" "$fmt"
+}
+
+_tpick_import() {
+  local arg="${1:-}"
+  if [[ -z "$arg" ]]; then
+    echo "tpick import: usage: tpick import <gist-url-or-id>" >&2
+    return 1
+  fi
+  if ! _tpick_have gh; then
+    echo "tpick import: gh CLI required" >&2
+    echo "  brew install gh && gh auth login" >&2
+    return 1
+  fi
+
+  # Extract the gist id if a full URL was passed.
+  local gist_id="$arg"
+  if [[ "$arg" == *gist.github.com/* ]]; then
+    gist_id="${arg##*/}"
+  fi
+
+  local themes_dir="${TPICK_THEMES_DIR:-${HOME}/.local/share/tpick/themes}"
+  mkdir -p "$themes_dir"
+
+  local tmpdir
+  tmpdir=$(mktemp -d 2>/dev/null) || { echo "tpick import: mktemp failed" >&2; return 1; }
+
+  if ! gh gist view "$gist_id" --files 2>/dev/null | grep -q '\.toml$'; then
+    echo "tpick import: no .toml file in gist '$gist_id' (or gist not found)" >&2
+    rm -rf "$tmpdir"
+    return 1
+  fi
+
+  local toml_filename
+  toml_filename=$(gh gist view "$gist_id" --files 2>/dev/null | grep '\.toml$' | head -1)
+  if [[ -z "$toml_filename" ]]; then
+    echo "tpick import: couldn't determine .toml filename" >&2
+    rm -rf "$tmpdir"
+    return 1
+  fi
+
+  local dest="$themes_dir/$toml_filename"
+  if [[ -e "$dest" ]]; then
+    echo "tpick import: '$toml_filename' already exists at $dest" >&2
+    echo "  Remove it first, or rename your local copy." >&2
+    rm -rf "$tmpdir"
+    return 1
+  fi
+
+  if ! gh gist view "$gist_id" --filename "$toml_filename" --raw > "$dest" 2>/dev/null; then
+    echo "tpick import: failed to download $toml_filename" >&2
+    rm -f "$dest"
+    rm -rf "$tmpdir"
+    return 1
+  fi
+  rm -rf "$tmpdir"
+
+  local n="${toml_filename%.toml}"
+  echo "  ✓ imported $n (at $dest)"
+  echo "  Apply with: tpick   (then pick '$n')"
 }
 
 # ── Auto dark/light (follows macOS appearance) ────────────────────────────────
@@ -708,6 +882,7 @@ _tpick_auto_apply() {
   _tpick_sync "$target_path"
   [[ -n "$current_path" && "$current_path" != "$target_path" ]] \
     && _tpick_save_last "$current_path"
+  _tpick_history_push "$target_path"
 
   local n="${target_path##*/}"
   local icon="🌙"; [[ "$mode" == "light" ]] && icon="☀️"
@@ -875,6 +1050,114 @@ _tpick_auto() {
   esac
 }
 
+# ── Sync external tools to terminal colors ────────────────────────────────────
+# Strategy: configure bat and delta to use the "ansi" theme. They then render
+# with the terminal's current palette — when tpick changes alacritty colors,
+# bat and delta follow automatically with zero per-theme mapping.
+
+_tpick_sync_bat_on() {
+  if ! _tpick_have bat; then
+    echo "  bat:    not installed (skipping)"
+    return 0
+  fi
+  local cfg="${BAT_CONFIG_PATH:-$HOME/.config/bat/config}"
+  mkdir -p "${cfg%/*}"
+  touch "$cfg"
+  # Strip existing --theme lines and any prior tpick-managed line, then append.
+  local tmp="$cfg.tpick.$$"
+  if [[ -s "$cfg" ]]; then
+    grep -v -E '^\s*--theme(=|\s)|tpick:managed' "$cfg" > "$tmp" 2>/dev/null || : > "$tmp"
+  else
+    : > "$tmp"
+  fi
+  # Ensure trailing newline before appending.
+  [[ -s "$tmp" && "$(tail -c1 "$tmp")" != "" ]] && printf '\n' >> "$tmp"
+  printf '%s\n' '--theme="ansi"  # tpick:managed' >> "$tmp"
+  mv "$tmp" "$cfg"
+  echo "  bat:    ✓ --theme=\"ansi\" set in $cfg"
+}
+
+_tpick_sync_bat_off() {
+  if ! _tpick_have bat; then return 0; fi
+  local cfg="${BAT_CONFIG_PATH:-$HOME/.config/bat/config}"
+  [[ ! -f "$cfg" ]] && { echo "  bat:    nothing to remove"; return 0; }
+  local tmp="$cfg.tpick.$$"
+  grep -v 'tpick:managed' "$cfg" > "$tmp" 2>/dev/null || : > "$tmp"
+  mv "$tmp" "$cfg"
+  echo "  bat:    ✓ tpick-managed line removed from $cfg"
+}
+
+_tpick_sync_delta_on() {
+  if ! _tpick_have git; then
+    echo "  delta:  git not installed (skipping)"
+    return 0
+  fi
+  if ! _tpick_have delta; then
+    echo "  delta:  not installed (skipping)"
+    return 0
+  fi
+  git config --global delta.syntax-theme ansi
+  echo "  delta:  ✓ syntax-theme = ansi (in ~/.gitconfig)"
+}
+
+_tpick_sync_delta_off() {
+  if ! _tpick_have git; then return 0; fi
+  if git config --global --get delta.syntax-theme >/dev/null 2>&1; then
+    git config --global --unset delta.syntax-theme
+    echo "  delta:  ✓ syntax-theme unset"
+  else
+    echo "  delta:  nothing to remove"
+  fi
+}
+
+_tpick_sync_status() {
+  echo "  tpick sync"
+  echo "  ──────────"
+
+  if _tpick_have bat; then
+    local cfg="${BAT_CONFIG_PATH:-$HOME/.config/bat/config}"
+    if [[ -f "$cfg" ]] && grep -q 'tpick:managed' "$cfg" 2>/dev/null; then
+      echo "  bat:    ✓ synced (ansi)"
+    else
+      echo "  bat:    ✗ not synced  (run: tpick sync on)"
+    fi
+  else
+    echo "  bat:    not installed"
+  fi
+
+  if _tpick_have delta && _tpick_have git; then
+    local t
+    t=$(git config --global --get delta.syntax-theme 2>/dev/null)
+    if [[ "$t" == "ansi" ]]; then
+      echo "  delta:  ✓ synced (ansi)"
+    else
+      echo "  delta:  ✗ not synced  (run: tpick sync on)"
+    fi
+  else
+    echo "  delta:  not installed"
+  fi
+}
+
+_tpick_sync_cmd() {
+  case "${1:-}" in
+    "")
+      _tpick_sync_status
+      ;;
+    on|enable)
+      _tpick_sync_bat_on
+      _tpick_sync_delta_on
+      ;;
+    off|disable)
+      _tpick_sync_bat_off
+      _tpick_sync_delta_off
+      ;;
+    *)
+      echo "tpick sync: unknown subcommand '$1'. Use: tpick sync [on|off]" >&2
+      return 1
+      ;;
+  esac
+}
+
 # ── Claude Code picker ────────────────────────────────────────────────────────
 
 _tpick_claude() {
@@ -971,6 +1254,10 @@ tpick() {
       shift
       _tpick_auto "$@"
       ;;
+    sync)
+      shift
+      _tpick_sync_cmd "$@"
+      ;;
     new)
       _tpick_new "${2:-}"
       ;;
@@ -979,6 +1266,16 @@ tpick() {
       ;;
     info)
       _tpick_info "${2:-}"
+      ;;
+    share)
+      _tpick_share "${2:-}"
+      ;;
+    import)
+      _tpick_import "${2:-}"
+      ;;
+    export)
+      shift
+      _tpick_export "$@"
       ;;
     remove|rm)
       _tpick_remove "${2:-}"
@@ -1028,9 +1325,15 @@ USAGE
   tpick auto status      Show config + macOS mode + launchd agent state
   tpick auto on|off      Install/remove launchd agent (polls every 10s)
   tpick auto clear       Wipe auto config + launchd agent
+  tpick sync             Show sync status for bat / delta
+  tpick sync on|off      Wire bat & delta to use "ansi" (terminal colors)
   tpick new [name]       Copy current theme as a new one and open in $EDITOR
   tpick edit [name]      Edit a theme file in $EDITOR (default: current)
   tpick remove [name]    Remove a theme file (asks confirmation)
+  tpick share [name]     Create a public gist with a theme; copies URL
+  tpick import <url|id>  Download a theme from a gist into TPICK_THEMES_DIR
+  tpick export [name] --kitty | --ghostty
+                         Convert the theme to kitty/ghostty config (stdout)
   tpick fetch            Download themes from alacritty/alacritty-theme
   tpick update           Update tpick and download new themes
   tpick --alacritty      Force Alacritty mode
